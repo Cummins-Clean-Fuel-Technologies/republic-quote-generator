@@ -1,0 +1,125 @@
+
+import streamlit as st
+import pandas as pd
+from fpdf import FPDF
+import tempfile
+import os
+
+# Load configuration data
+@st.cache_data
+def load_data():
+    df = pd.read_excel("REPUBLIC CONFIG MASTER.xlsx", sheet_name="Sheet2", header=None)
+    headers = df.iloc[1]
+    df = df.iloc[2:].reset_index(drop=True)
+    df.columns = headers
+    df = df.dropna(how='all')
+    return df
+
+df = load_data()
+
+# Display logos at the top
+st.image("Cummins logo.png", width=200)
+st.image("republic_logo.png", width=150)
+st.title("Republic Services Quote Generator")
+st.markdown("Powered by Cummins Clean Fuel Technologies")
+
+# Input fields
+app_type = st.selectbox("Application", sorted(df["Application"].dropna().unique()))
+body_mfg = st.selectbox("Body Manufacturer", sorted(df["BODY MFG INPUTS"].dropna().unique()))
+body_model = st.selectbox("Body Model", sorted(df["BODY MODEL INPUTS"].dropna().unique()))
+chassis_mfg = st.selectbox("Chassis Manufacturer", sorted(df["CHASSIS MANUFACTURE INPUTS"].dropna().unique()))
+chassis_model = st.selectbox("Chassis Model", sorted(df["CHASSIS MODEL INPUTS"].dropna().unique()))
+chassis_type = st.selectbox("Chassis Type", sorted(df["Chassis Type"].dropna().unique()))
+cab = st.selectbox("Cab Type", sorted(df["CHASSIS CAB"].dropna().unique()))
+mounting = st.selectbox("CNG Mounting", sorted(df["CNG MOUNTING INPUTS"].dropna().unique()))
+system_type = st.selectbox("System Type", sorted(df["System Type"].dropna().unique()))
+dge = st.selectbox("System DGE", sorted(df["System DGE"].dropna().unique()))
+
+# Filter matching configurations
+query = (
+    (df["Application"] == app_type) &
+    (df["BODY MFG INPUTS"] == body_mfg) &
+    (df["BODY MODEL INPUTS"] == body_model) &
+    (df["CHASSIS MANUFACTURE INPUTS"] == chassis_mfg) &
+    (df["CHASSIS MODEL INPUTS"] == chassis_model) &
+    (df["Chassis Type"] == chassis_type) &
+    (df["CHASSIS CAB"] == cab) &
+    (df["CNG MOUNTING INPUTS"] == mounting) &
+    (df["System Type"] == system_type) &
+    (df["System DGE"] == dge)
+)
+
+results = df[query]
+
+if not results.empty:
+    st.success(f"{len(results)} matching configuration(s) found.")
+    
+    # Show them in a table
+    display_cols = ["New System PN", "SYSTEM PART #", "System cost", "Freight", "FET", "Total"]
+    st.dataframe(results[display_cols])
+
+    # Let user select one for PDF export
+    index_list = results.index.tolist()
+    selection = st.selectbox("Select a system configuration to quote", index_list, format_func=lambda i: f"{results.loc[i]['New System PN']} - ${results.loc[i]['Total']}")
+    selected = results.loc[selection]
+
+    st.write("### Quote Summary")
+    st.write(f"**System Part Number:** {selected['SYSTEM PART #']}")
+    st.write(f"**New System PN:** {selected['New System PN']}")
+    st.write(f"**Installation Kit PN:** {selected['Installation kit PN']}")
+    st.write(f"**System Cost:** ${selected['System cost']}")
+    st.write(f"**Freight:** ${selected['Freight']}")
+    st.write(f"**FET:** ${selected['FET']}")
+    st.write(f"### **Total Price: ${selected['Total']}**")
+
+    if st.button("📄 Download PDF Quote"):
+        pdf = FPDF()
+        pdf.add_page()
+
+        # Logos
+        pdf.image("Cummins logo.png", x=10, y=8, w=40)
+        pdf.image("republic_logo.png", x=160, y=8, w=40)
+        pdf.ln(30)
+
+        pdf.set_font("Arial", size=12)
+        pdf.cell(200, 10, txt="Republic Services Quote", ln=True, align="C")
+        pdf.ln(10)
+        pdf.set_font("Arial", size=10)
+
+        def write_line(label, value):
+            pdf.cell(200, 8, txt=f"{label}: {value}", ln=True)
+
+        # Customer selection summary
+        write_line("Application", app_type)
+        write_line("Body Manufacturer", body_mfg)
+        write_line("Body Model", body_model)
+        write_line("Chassis Manufacturer", chassis_mfg)
+        write_line("Chassis Model", chassis_model)
+        write_line("Chassis Type", chassis_type)
+        write_line("Cab Type", cab)
+        write_line("Mounting", mounting)
+        write_line("System Type", system_type)
+        write_line("DGE", dge)
+        pdf.ln(5)
+
+        # Configuration details
+        write_line("System Part Number", selected['SYSTEM PART #'])
+        write_line("New System PN", selected['New System PN'])
+        write_line("Installation Kit PN", selected['Installation kit PN'])
+        write_line("System Cost", f"${selected['System cost']}")
+        write_line("Freight", f"${selected['Freight']}")
+        write_line("FET", f"${selected['FET']}")
+        pdf.set_font("Arial", 'B', 12)
+        write_line("TOTAL", f"${selected['Total']}")
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmpfile:
+            pdf.output(tmpfile.name)
+            st.download_button(
+                label="📄 Download PDF",
+                data=open(tmpfile.name, "rb").read(),
+                file_name="republic_quote.pdf",
+                mime="application/pdf"
+            )
+        os.unlink(tmpfile.name)
+else:
+    st.warning("No matching configuration found. Please adjust your selections.")
